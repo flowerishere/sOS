@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(format_args_nl)]
 #![feature(used_with_arg)]
 use alloc::{
     boxed::Box,
