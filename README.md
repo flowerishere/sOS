@@ -66,20 +66,30 @@ x86) before running on bare metal.
 ## Building and Running
 
 ### Prerequisites
-You will need a nightly Rust toolchain and QEMU for aarch64 emulation.
+You will need QEMU for aarch64 emulation, dosfstools to create the virtual file system
+and gcc-aarch64-linux-gnu to compile bash for the image.
 
 ```bash
-# Install Rust Nightly
-rustup toolchain install nightly
-rustup component add rust-src llvm-tools-preview
+# Install QEMU (Ubuntu/Debian), dosfstools and gcc-aarch64-linux-gnu
+sudo apt install qemu-system-aarch64 dosfstools gcc-aarch64-linux-gnu
+```
 
-# Install QEMU (Ubuntu/Debian)
-sudo apt install qemu-system-aarch64
+Additionally you will need a version of the [aarch64-none-elf](https://developer.arm.com/Tools%20and%20Software/GNU%20Toolchain) toolchain installed.
+
+#### Any OS
+To install aarch64-none-elf on any os, download the correct release of `aarch64-none-elf` onto your computer, unpack it, then export the `bin` folder to path.
+
+#### NixOS
+
+Run the following command
+
+```bash
+nix shell nixpkgs#pkgsCross.aarch64-embedded.stdenv.cc nixpkgs#pkgsCross.aarch64-embedded.stdenv.cc.bintools
 ```
 
 ### Running via QEMU
 
-To build the kernel and launch it in QEMU: 
+To build the kernel and launch it in QEMU:
 
 ``` bash
 cargo run --release
