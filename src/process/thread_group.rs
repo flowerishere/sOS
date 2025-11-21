@@ -19,6 +19,7 @@ pub mod pid;
 pub mod rsrc_lim;
 pub mod signal;
 pub mod wait;
+pub mod umask;
 
 /// Task Group ID. In user-space this is the same as a Process ID (PID).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -90,6 +91,7 @@ pub struct ThreadGroup {
     pub pgid: SpinLock<Pgid>,
     pub sid: SpinLock<Sid>,
     pub state: SpinLock<ProcessState>,
+    pub umask: SpinLock<u32>,
     pub parent: SpinLock<Option<Weak<ThreadGroup>>>,
     pub children: SpinLock<BTreeMap<Tgid, Arc<ThreadGroup>>>,
     pub threads: SpinLock<BTreeMap<Tid, Weak<Task>>>,

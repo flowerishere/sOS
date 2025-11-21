@@ -15,6 +15,7 @@ use super::{
 pub struct ThreadGroupBuilder {
     tgid: Tgid,
     parent: Option<Arc<ThreadGroup>>,
+    umask: Option<u32>,
     sigstate: Option<Arc<SpinLock<SignalState>>>,
     rsrc_lim: Option<Arc<SpinLock<ResourceLimits>>>,
 }
@@ -25,6 +26,7 @@ impl ThreadGroupBuilder {
         ThreadGroupBuilder {
             tgid,
             parent: None,
+            umask: None,
             sigstate: None,
             rsrc_lim: None,
         }
@@ -33,6 +35,11 @@ impl ThreadGroupBuilder {
     /// Sets the parent of the thread group.
     pub fn with_parent(mut self, parent: Arc<ThreadGroup>) -> Self {
         self.parent = Some(parent);
+        self
+    }
+
+    pub fn with_umask(mut self, umask: u32) -> Self {
+        self.umask = Some(umask);
         self
     }
 
@@ -56,6 +63,7 @@ impl ThreadGroupBuilder {
             pgid: SpinLock::new(Pgid(self.tgid.value())),
             sid: SpinLock::new(Sid(self.tgid.value())),
             parent: SpinLock::new(self.parent.as_ref().map(Arc::downgrade)),
+            umask: SpinLock::new(self.umask.unwrap_or(0)),
             children: SpinLock::new(BTreeMap::new()),
             signals: self
                 .sigstate
