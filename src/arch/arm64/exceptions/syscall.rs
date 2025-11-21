@@ -121,6 +121,15 @@ pub async fn handle_syscall() {
             )
             .await
         }
+        0x4e => {
+            sys_readlinkat(
+                arg1.into(),
+                TUA::from_value(arg2 as _),
+                TUA::from_value(arg3 as _),
+                arg4 as _,
+            )
+            .await
+        }
         0x4f => {
             sys_newfstatat(
                 arg1.into(),
