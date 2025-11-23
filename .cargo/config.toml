@@ -2,4 +2,4 @@
 target = "aarch64-unknown-none-softfloat"
 
 [target.aarch64-unknown-none-softfloat]
-runner = "./qemu-runner.sh"
+runner = "scripts/qemu-runner.sh"
