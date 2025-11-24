@@ -37,7 +37,7 @@ model within the kernel context:
 
 ###  Process Management
 * Full task management including scheduling and task migration via IPIs.
-* Currently implements [51 Linux syscalls](./etc/syscalls.md); sufficient to execute most BusyBox
+* Currently implements [51 Linux syscalls](./etc/syscalls_linux_aarch64.md); sufficient to execute most BusyBox
   commands.
 * Advanced forking capabilities via `clone()`.
 * Process and thread signal delivery and raising support.
