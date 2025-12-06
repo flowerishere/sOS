@@ -3,6 +3,7 @@ use std::path::PathBuf;
 fn main() {
     let linker_script = match std::env::var("CARGO_CFG_TARGET_ARCH") {
         Ok(arch) if arch == "aarch64" => PathBuf::from("./src/arch/arm64/boot/linker.ld"),
+        Ok(arch) if arch == "riscv64" => PathBuf::from("./src/arch/riscv64/boot/link.ld"),
         Ok(arch) => {
             println!("Unsupported arch: {arch}");
             std::process::exit(1);

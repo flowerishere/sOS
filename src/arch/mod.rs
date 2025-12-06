@@ -13,6 +13,7 @@ use crate::process::{
     thread_group::signal::{SigId, ksigaction::UserspaceSigAction},
 };
 use alloc::sync::Arc;
+use core::future::Future;
 use libkernel::{
     CpuOps, VirtualMemory,
     error::Result,
@@ -150,8 +151,16 @@ pub trait Arch: CpuOps + VirtualMemory {
     ) -> impl Future<Output = Result<usize>>;
 }
 
+// --- Architecture Specific Modules ---
+
 #[cfg(target_arch = "aarch64")]
 mod arm64;
 
 #[cfg(target_arch = "aarch64")]
 pub use self::arm64::Aarch64 as ArchImpl;
+
+#[cfg(target_arch = "riscv64")]
+mod riscv64;
+
+#[cfg(target_arch = "riscv64")]
+pub use self::riscv64::Riscv64 as ArchImpl;
