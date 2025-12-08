@@ -2,13 +2,12 @@ use core::arch::asm;
 use crate::memory::address::VA;
 
 /// A trait for invalidating TLB entries.
-/// This trait matches the interface expected by MappingContext.
 pub trait TlbInvalidator {
     fn invalidate_page(&self, va: VA);
     fn invalidate_all(&self);
 }
 
-/// TLB Invalidator that uses the RISC-V `sfence.vma` instruction.
+/// RISC-V implementation using sfence.vma
 pub struct SfenceTlbInvalidator;
 
 impl SfenceTlbInvalidator {
@@ -20,8 +19,6 @@ impl SfenceTlbInvalidator {
 impl TlbInvalidator for SfenceTlbInvalidator {
     fn invalidate_page(&self, va: VA) {
         unsafe {
-            // sfence.vma vaddr, asid
-            // x0 for asid means all ASIDs (or current depending on implementation, usually we supply x0)
             asm!("sfence.vma {}, x0", in(reg) va.value());
         }
     }
@@ -33,7 +30,7 @@ impl TlbInvalidator for SfenceTlbInvalidator {
     }
 }
 
-/// A dummy invalidator for early boot (before MMU is on).
+/// Dummy invalidator
 pub struct NullTlbInvalidator;
 
 impl TlbInvalidator for NullTlbInvalidator {
