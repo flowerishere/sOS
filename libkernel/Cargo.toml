@@ -14,6 +14,9 @@ bitflags = "2.9.1"
 ringbuf = { version = "0.4.8", default-features = false, features = ["alloc"] }
 intrusive-collections = { version = "0.9.7", default-features = false }
 
+riscv = "0.10"
+sbi-rt = "0.0.3"
+
 [dev-dependencies]
 rand = "0.9.1"
 tokio = { version = "1.47.1", features = ["full"] }

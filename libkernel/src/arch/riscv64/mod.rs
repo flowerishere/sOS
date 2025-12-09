@@ -1,59 +1,29 @@
-use core::future::Future;
+// libkernel/src/arch/riscv64/mod.rs
+
 use riscv::register::{sstatus, sie};
+// 注意：SpinLockIrq 的引用路径可能需要根据你的 libkernel 结构调整
+// 如果 sync 模块在 libkernel 根目录：
+use crate::{CpuOps, VirtualMemory, KernAddressSpace, sync::spinlock::SpinLockIrq};
 
-// We temporarily comment out process imports since they are missing in libkernel root
-// use crate::process::{Task, thread_group::signal::{SigId, ksigaction::UserspaceSigAction}};
-// use alloc::sync::Arc;
+// 1. 删除 pub mod boot; 和 pub mod fdt;
+// 2. 保留实现 Arch Trait 必须的模块
+pub mod cpu_ops;   // 实现 CpuOps
+pub mod exceptions; // 实现 UserContext (TrapFrame)
+pub mod memory;    // 实现 VirtualMemory
 
-use crate::{
-    CpuOps, VirtualMemory,
-    error::{Result, KernelError},
-    memory::address::{UA, VA},
-    sync::spinlock::Spinlock,
-    KernAddressSpace,
-};
-
-// Declare submodules
-pub mod boot;
-pub mod memory;
-pub mod exceptions;
-pub mod cpu_ops;
-pub mod fdt;
-
-// Re-export boot functions for the assembly entry point
-pub use boot::*; 
-
-/// The RISC-V 64 architecture implementation struct.
+// 定义架构结构体
 pub struct Riscv64;
 
-impl CpuOps for Riscv64 {
-    #[inline(always)]
-    fn id() -> usize {
-        // In S-Mode on QEMU/Virt, Hart ID is often passed in a0 or stored in tp
-        // We assume it was saved to tp during boot
-        let hartid: usize;
-        unsafe { core::arch::asm!("mv {}, tp", out(reg) hartid) };
-        hartid
-    }
-
-    #[inline(always)]
-    fn enable_interrupts() {
-        unsafe { sstatus::set_sie() };
-    }
-
-    #[inline(always)]
-    fn disable_interrupts() {
-        unsafe { sstatus::clear_sie() };
-    }
-
-    #[inline(always)]
-    fn irq_enabled() -> bool {
-        sstatus::read().sie()
-    }
-}
-
+// 实现 VirtualMemory Trait (这是 libkernel 必须的)
 impl VirtualMemory for Riscv64 {
-    fn kern_address_space() -> &'static Spinlock<KernAddressSpace> {
+    type PageTableRoot = memory::pg_tables::L2Table; // Sv39 Root
+    type ProcessAddressSpace = memory::mmu::RiscvProcessAddressSpace;
+    type KernelAddressSpace = memory::mmu::RiscvKernelAddressSpace;
+
+    // Sv39 线性映射偏移量 (Upper half kernel)
+    const PAGE_OFFSET: usize = 0xffff_ffc0_0000_0000; 
+
+    fn kern_address_space() -> &'static SpinLockIrq<Self::KernelAddressSpace, Self> {
         &memory::mmu::KERN_ADDR_SPACE
     }
 }
@@ -65,36 +35,28 @@ impl crate::arch::Arch for Riscv64 {
         "riscv64"
     }
 
-    fn new_user_context(entry_point: VA, stack_top: VA) -> Self::UserContext {
+    fn new_user_context(entry_point: crate::memory::address::VA, stack_top: crate::memory::address::VA) -> Self::UserContext {
         exceptions::TrapFrame::new_user(entry_point, stack_top)
     }
-
-    // Methods commented out in trait definition are omitted here:
-    // context_switch, create_idle_task, do_signal
 
     fn power_off() -> ! {
         sbi_rt::system_reset(sbi_rt::Shutdown, sbi_rt::NoReason);
         loop { unsafe { riscv::asm::wfi() }; }
     }
 
-    fn do_signal_return() -> impl Future<Output = Result<<Self as crate::arch::Arch>::UserContext>> {
-        // Placeholder implementation
-        async { Err(KernelError::NotImplemented) }
+    fn do_signal_return() -> impl core::future::Future<Output = crate::error::Result<Self::UserContext>> {
+        async { Err(crate::error::KernelError::NotImplemented) }
     }
 
-    unsafe fn copy_from_user(_src: UA, _dst: *mut (), _len: usize) -> impl Future<Output = Result<()>> {
-        async { Ok(()) } 
-    }
-
-    unsafe fn copy_to_user(_src: *const (), _dst: UA, _len: usize) -> impl Future<Output = Result<()>> {
+    unsafe fn copy_from_user(_src: crate::memory::address::UA, _dst: *mut (), _len: usize) -> impl core::future::Future<Output = crate::error::Result<()>> {
         async { Ok(()) }
     }
 
-    unsafe fn copy_strn_from_user(
-        _src: UA,
-        _dst: *mut u8,
-        _len: usize,
-    ) -> impl Future<Output = Result<usize>> {
+    unsafe fn copy_to_user(_src: *const (), _dst: crate::memory::address::UA, _len: usize) -> impl core::future::Future<Output = crate::error::Result<()>> {
+        async { Ok(()) }
+    }
+
+    unsafe fn copy_strn_from_user(_src: crate::memory::address::UA, _dst: *mut u8, _len: usize) -> impl core::future::Future<Output = crate::error::Result<usize>> {
         async { Ok(0) }
     }
 }
