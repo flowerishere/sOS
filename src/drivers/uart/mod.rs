@@ -51,7 +51,10 @@ use libkernel::{
 };
 
 //pub mod bcm2835_aux;
+// Guard architecture specific drivers
+#[cfg(any(feature = "arch-aarch64", target_arch = "aarch64"))]
 pub mod imx_lp;
+#[cfg(any(feature = "arch-aarch64", target_arch = "aarch64"))]
 pub mod pl011;
 
 /// A trait for low-level, hardware-specific UART drivers.

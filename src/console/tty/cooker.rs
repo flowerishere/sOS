@@ -6,6 +6,7 @@ use crate::sync::{CondVar, SpinLock};
 use alloc::{sync::Arc, vec::Vec};
 use libkernel::error::Result;
 use libkernel::sync::condvar::WakeupType;
+use ringbuf::traits::*;
 
 pub struct TtyInputCooker {
     cooked_buf: KPipe,

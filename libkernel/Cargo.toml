@@ -3,6 +3,11 @@ name = "libkernel"
 version = "0.0.0"
 edition = "2024"
 
+[features]
+default = ["arch-aarch64"]
+arch-aarch64 = []
+arch-riscv64 = ["dep:riscv", "dep:sbi-rt"]
+
 [dependencies]
 paste = "1.0.15"
 thiserror = { version = "2.0.12", default-features = false }
@@ -14,8 +19,13 @@ bitflags = "2.9.1"
 ringbuf = { version = "0.4.8", default-features = false, features = ["alloc"] }
 intrusive-collections = { version = "0.9.7", default-features = false }
 
-riscv = "0.10"
-sbi-rt = "0.0.3"
+[dependencies.riscv]
+version = "0.10"
+optional = true
+
+[dependencies.sbi-rt]
+version = "0.0.3"
+optional = true
 
 [dev-dependencies]
 rand = "0.9.1"

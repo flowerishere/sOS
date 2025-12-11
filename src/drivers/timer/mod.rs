@@ -14,6 +14,7 @@ use crate::{
 
 use super::Driver;
 
+#[cfg(any(feature = "arch-aarch64", target_arch = "aarch64"))]
 pub mod armv8_arch;
 
 /// Represents a fixed point in monotonic time.

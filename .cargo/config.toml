@@ -1,6 +1,6 @@
 [build]
-target = "aarch64-unknown-none-softfloat"
-#target = "riscv64gc-unknown-none-elf"
+#target = "aarch64-unknown-none-softfloat"
+target = "riscv64gc-unknown-none-elf"
 
 [target.aarch64-unknown-none-softfloat]
 runner = "scripts/qemu-runner-aarch64.sh"

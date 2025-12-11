@@ -1,14 +1,18 @@
-[workspace]
-members = [ "libkernel" ]
-
 [package]
 name = "moss"
 version = "0.1.0"
 edition = "2024"
 
-# Common Dependencies
+[workspace]
+members = [ "libkernel" ]
+
+[features]
+default = ["arch-aarch64"]
+arch-aarch64 = ["dep:aarch64-cpu", "dep:arm-pl011-uart", "libkernel/arch-aarch64"]
+arch-riscv64 = ["dep:riscv", "dep:sbi-rt", "libkernel/arch-riscv64"]
+
 [dependencies]
-libkernel = { path = "libkernel" }
+libkernel = { path = "libkernel", default-features = false }
 linked_list_allocator = "0.10.5"
 static_cell = "2.1.0"
 tock-registers = "0.10.1"
@@ -27,13 +31,24 @@ bitflags = "2.9.1"
 futures = { version = "0.3.31", default-features = false, features = ["alloc"] }
 rand = { version = "0.9.2", default-features = false, features = ["small_rng"] }
 
-[target.'cfg(target_arch = "aarch64")'.dependencies]
-aarch64-cpu = "11.1.0"
-arm-pl011-uart = { version = "0.3.1", default-features = false }
+# --- Architecture Specific Dependencies (Optional) ---
+[dependencies.aarch64-cpu]
+version = "11.1.0"
+optional = true
 
-[target.'cfg(target_arch = "riscv64")'.dependencies]
-riscv = "0.12.1"
-sbi-rt = { version = "0.0.3", features = ["legacy"] }
+[dependencies.arm-pl011-uart]
+version = "0.3.1"
+default-features = false
+optional = true
+
+[dependencies.riscv]
+version = "0.12.1"
+optional = true
+
+[dependencies.sbi-rt]
+version = "0.0.3"
+features = ["legacy"]
+optional = true
 
 [profile.release]
 strip = true

@@ -143,15 +143,17 @@ pub async fn sys_wait4(
         .process
         .child_notifiers
         .inner
-        .wait_until(|state| {
-            let key = if pid == -1 {
-                state.iter().find_map(|(k, v)| {
-                    if v.matches_wait_flags(flags) {
-                        Some(*k)
-                    } else {
-                        None
-                    }
-                })
+        .wait_until(|state: &mut BTreeMap<Pid, ChildState>| {
+    let key = if pid == -1 {
+        state.iter().find_map(|(k, v)| {
+            if v.matches_wait_flags(flags) {
+                Some(*k)
+            } else {
+                None
+            }
+        })
+
+
             } else {
                 state
                     .get_key_value(&Tgid::from_pid_t(pid))

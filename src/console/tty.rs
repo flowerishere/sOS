@@ -25,6 +25,7 @@ use meta::{
 };
 
 use super::Console;
+use ringbuf::traits::*;
 
 mod cooker;
 mod meta;

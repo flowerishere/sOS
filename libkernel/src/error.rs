@@ -122,7 +122,9 @@ pub enum KernelError {
     #[error("No such process")]
     NoProcess,
     #[error("Not implemented")]
-    NotImplemented, // Added this variant
+    NotImplemented,
+    #[error("Name too long")]
+    NameTooLong,
     #[error("{0}")]
     Other(&'static str),
 }

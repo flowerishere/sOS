@@ -165,16 +165,13 @@ pub trait Arch: CpuOps + VirtualMemory {
 // --- Architecture Specific Modules ---
 
 // Temporarily comment out arm64 to avoid "file not found" errors while working on riscv64
-/*
-#[cfg(target_arch = "aarch64")]
+#[cfg(feature = "arch-aarch64")]
 pub mod arm64;
 
-#[cfg(target_arch = "aarch64")]
-pub use self::arm64::Aarch64 as ArchImpl;
-*/
 
-#[cfg(target_arch = "riscv64")]
+
+#[cfg(feature = "arch-riscv64")]
 pub mod riscv64;
 
-#[cfg(target_arch = "riscv64")]
-pub use object::Architecture::Riscv64 as ArchImpl;
+#[cfg(feature = "arch-riscv64")]
+pub use self::riscv64::Riscv64 as ArchImpl;

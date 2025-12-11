@@ -14,6 +14,7 @@ use libkernel::{
     fs::{Inode, SeekFrom},
     memory::{PAGE_SIZE, address::UA},
 };
+use ringbuf::traits::*;
 
 const SPLICE_BUF_SZ: usize = 32;
 

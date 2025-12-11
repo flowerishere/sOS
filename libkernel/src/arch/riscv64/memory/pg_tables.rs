@@ -60,6 +60,8 @@ impl_pgtable!(L2Table, 30, L1Table, false); // Root
 impl_pgtable!(L1Table, 21, L0Table, false);
 impl_pgtable!(L0Table, 12, L0Table, true);  // Leaf
 
+pub type RvPageTableRoot = PgTableArray<L2Table>;
+
 pub trait PageTableMapper {
     unsafe fn with_page_table<T: PgTable, R>(
         &mut self,
