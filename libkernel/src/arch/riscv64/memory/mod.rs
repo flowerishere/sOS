@@ -1,4 +1,3 @@
-pub mod mmu;
 pub mod pg_descriptors;
 pub mod pg_tables;
 pub mod pg_walk;

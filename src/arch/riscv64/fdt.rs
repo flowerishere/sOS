@@ -1,0 +1,1 @@
+pub const MAX_FDT_SZ: usize = 2 * 1024 * 1024;

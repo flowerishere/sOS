@@ -1,5 +1,4 @@
 use alloc::boxed::Box;
-use libkernel::fs::DirEntry;
 use alloc::ffi::CString;
 use async_trait::async_trait;
 use core::alloc::Layout;
@@ -134,7 +133,7 @@ pub async fn sys_getdents64(fd: Fd, mut ubuf: UA, size: u32) -> Result<usize> {
 
     let (ops, ctx) = &mut *file.lock().await;
 
-    let mut entries_iter: Box<dyn Iterator<Item = Result<DirEntry>> + Send + Unpin> = ops.readdir(ctx).await?;
+    let mut entries_iter = ops.readdir(ctx).await?;
 
     let mut bytes_written = 0;
 

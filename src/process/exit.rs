@@ -65,7 +65,7 @@ pub fn do_exit_group(exit_code: ChildState) {
 
         let mut init_children = init.children.lock_save_irq();
 
-        let mut our_children: Vec<Arc<Task>> = core::mem::take(&mut *our_children).into_iter().collect();
+        let mut our_children: Vec<_> = core::mem::take(&mut *our_children).into_iter().collect();
 
         for (tgid, our_child) in our_children.drain(..) {
             *our_child.parent.lock_save_irq() = Some(Arc::downgrade(&init));

@@ -139,21 +139,20 @@ pub async fn sys_wait4(
 
     let task = current_task();
 
-    let (tgid, child_state) = task
+
+    let (tgid, child_state): (Tgid, ChildState) = task
         .process
         .child_notifiers
         .inner
-        .wait_until(|state: &mut BTreeMap<Pid, ChildState>| {
-    let key = if pid == -1 {
-        state.iter().find_map(|(k, v)| {
-            if v.matches_wait_flags(flags) {
-                Some(*k)
-            } else {
-                None
-            }
-        })
-
-
+        .wait_until(|state: &mut BTreeMap<Tgid, ChildState>| {
+            let key = if pid == -1 {
+                state.iter().find_map(|(k, v)| {
+                    if v.matches_wait_flags(flags) {
+                        Some(*k)
+                    } else {
+                        None
+                    }
+                })
             } else {
                 state
                     .get_key_value(&Tgid::from_pid_t(pid))
@@ -169,7 +168,6 @@ pub async fn sys_wait4(
             Some(state.remove_entry(&key).unwrap())
         })
         .await;
-
     if !stat_addr.is_null() {
         match child_state {
             ChildState::NormalExit { code } => {

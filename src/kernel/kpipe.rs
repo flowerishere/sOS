@@ -12,7 +12,7 @@ use libkernel::{
     error::Result,
     memory::{PAGE_SIZE, address::UA, kbuf::KBufCore},
 };
-use ringbuf::storage::Storage;
+use ringbuf::{storage::Storage, traits::*}; // 引入 traits 以便调用 inner 的 trait 方法
 
 pub struct PageBackedStorage<T>(ClaimedPage, PhantomData<T>);
 
@@ -43,9 +43,45 @@ impl<T> KBuf<T> {
             inner: KBufCore::new(PageBackedStorage(pg, PhantomData)),
         })
     }
+
+    // === 显式转发同步方法 (修复 cooker.rs 的报错) ===
+
+    /// 尝试推入一个元素，如果满则失败（非阻塞）
+    pub fn try_push(&self, item: T) -> core::result::Result<(), T> {
+        self.inner.try_push(item)
+    }
+
+    /// 尝试推入一个切片，返回实际写入的数量（非阻塞）
+    pub fn try_push_slice(&self, elems: &[T]) -> usize
+    where
+        T: Copy,
+    {
+        self.inner.try_push_slice(elems)
+    }
+
+    /// 尝试弹出一个元素（非阻塞）
+    pub fn try_pop(&self) -> Option<T> {
+        self.inner.try_pop()
+    }
+
+    // === 显式转发异步方法 (修复 tty.rs 的报错) ===
+
+    pub async fn push_slice(&self, elems: &[T]) -> usize
+    where
+        T: Copy,
+    {
+        self.inner.push_slice(elems).await
+    }
+
+    pub async fn pop_slice(&self, elems: &mut [T]) -> usize
+    where
+        T: Copy,
+    {
+        self.inner.pop_slice(elems).await
+    }
 }
 
-// Implement Deref to forward all &self methods automatically
+// 保留 Deref 以支持其他基本方法 (如 len, is_empty)
 impl<T> Deref for KBuf<T> {
     type Target = KBufCore<T, PageBackedStorage<T>, ArchImpl>;
 
@@ -58,29 +94,21 @@ pub type KPipe = KBuf<u8>;
 
 impl KPipe {
     /// Copies `count` bytes to the KPipe from a user-space buffer.
-    ///
-    /// This function will fill the kbuf as much as possible and return the
-    /// number of bytes written. If the buffer is full when called, this
-    /// function will block until space becomes avilable.
     pub async fn copy_from_user(&self, src: UA, count: usize) -> Result<usize> {
         let mut temp_buf = [0u8; USER_COPY_CHUNK_SIZE];
         let chunk_buf = &mut temp_buf[..min(count, USER_COPY_CHUNK_SIZE)];
 
         copy_from_user_slice(src, chunk_buf).await?;
 
-        Ok(self.inner.push_slice(chunk_buf).await)
+        Ok(self.push_slice(chunk_buf).await)
     }
 
     /// Copies `count` bytes from the KPipe to a user-space buffer.
-    ///
-    /// This function will drain as much of the buffer as possible and return
-    /// the number of bytes written. If the buffer is empty when called, this
-    /// function will block until data becomes avilable.
     pub async fn copy_to_user(&self, dst: UA, count: usize) -> Result<usize> {
         let mut temp_buf = [0u8; USER_COPY_CHUNK_SIZE];
         let chunk_buf = &mut temp_buf[..min(count, USER_COPY_CHUNK_SIZE)];
 
-        let bytes_read = self.inner.pop_slice(chunk_buf).await;
+        let bytes_read = self.pop_slice(chunk_buf).await;
 
         copy_to_user_slice(chunk_buf, dst).await?;
 
@@ -88,10 +116,6 @@ impl KPipe {
     }
 
     /// Moves up to `count` bytes from `source` KBuf into `self`.
-    ///
-    /// It performs a direct memory copy between the kernel buffers without an
-    /// intermediate stack buffer. It also handles async waiting and deadlock
-    /// avoidance.
     pub async fn splice_from(&self, source: &KPipe, count: usize) -> usize {
         self.inner.splice_from(&source.inner, count).await
     }

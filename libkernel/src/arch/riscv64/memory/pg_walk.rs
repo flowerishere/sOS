@@ -1,139 +1,150 @@
-use core::marker::PhantomData;
-use core::cmp;
-
+use super::{
+    pg_descriptors::{L3Descriptor, PageTableEntry, TableMapper},
+    pg_tables::{L0Table, L3Table, PageTableMapper, PgTable, PgTableArray, TableMapperTable},
+    tlb::{NullTlbInvalidator, TLBInvalidator},
+};
 use crate::{
-    error::Result,
+    error::{MapError, Result},
     memory::{
-        address::{PA, TPA, VA},
+        PAGE_SIZE,
+        address::{TPA, VA},
+        region::VirtMemoryRegion,
     },
 };
 
-use super::{
-    pg_descriptors::{PageDescriptor, PteFlags},
-    pg_tables::{MapAttributes, MappingContext, PgTable, PgTableArray, PageAllocator, PageTableMapper},
-    tlb::TLBInvalidator,
-};
-
-pub struct Walk<T: PgTable> {
-    phantom: PhantomData<T>,
+pub struct WalkContext<'a, PM>
+where
+    PM: PageTableMapper + 'a,
+{
+    pub mapper: &'a mut PM,
+    pub invalidator: &'a dyn TLBInvalidator,
 }
 
-impl<T: PgTable> Walk<T> {
-    pub fn map_range<A, M, I>(
-        table_pa: TPA<PgTableArray<T>>,
-        attrs: MapAttributes,
-        ctx: &mut MappingContext<A, M, I>,
+trait RecursiveWalker: PgTable + Sized {
+    fn walk<F, PM>(
+        table_pa: TPA<PgTableArray<Self>>,
+        region: VirtMemoryRegion,
+        ctx: &mut WalkContext<PM>,
+        modifier: &mut F,
     ) -> Result<()>
     where
-        A: PageAllocator + ?Sized,
-        M: PageTableMapper + ?Sized,
-        I: TLBInvalidator + ?Sized,
-    {
-        Self::map_range_internal(
-            table_pa,
-            attrs.virt.start_address().value(),
-            attrs.virt.end_address().value(),
-            attrs.phys.start_address().value(),
-            &attrs,
-            ctx
-        )
-    }
+        PM: PageTableMapper,
+        F: FnMut(VA, L3Descriptor) -> L3Descriptor;
+}
 
-    fn map_range_internal<A, M, I>(
-        table_pa: TPA<PgTableArray<T>>,
-        va_start: usize,
-        va_end: usize,
-        pa_start: usize,
-        attrs: &MapAttributes,
-        ctx: &mut MappingContext<A, M, I>,
+impl<T> RecursiveWalker for T
+where
+    T: TableMapperTable,
+    T::NextLevel: RecursiveWalker,
+{
+    fn walk<F, PM>(
+        table_pa: TPA<PgTableArray<Self>>,
+        region: VirtMemoryRegion,
+        ctx: &mut WalkContext<PM>,
+        modifier: &mut F,
     ) -> Result<()>
     where
-        A: PageAllocator + ?Sized,
-        M: PageTableMapper + ?Sized,
-        I: TLBInvalidator + ?Sized,
+        PM: PageTableMapper,
+        F: FnMut(VA, L3Descriptor) -> L3Descriptor,
     {
-        let mut children_to_visit = [(0u16, PA::from_value(0)); 512];
-        let mut children_count = 0;
+        let table_coverage = 1 << T::SHIFT;
 
-        {
-            let allocator = &mut ctx.allocator;
-            let invalidator = &ctx.invalidator;
-            let mapper = &mut ctx.mapper;
+        let start_idx = Self::pg_index(region.start_address());
+        let end_idx = Self::pg_index(region.end_address_inclusive());
+        let table_base_va = region.start_address().align(1 << (T::SHIFT + 9));
 
-            unsafe {
-                mapper.with_page_table(table_pa, |table_va| -> Result<()> {
-                    let table = table_va.as_ptr() as *mut PgTableArray<T>;
-                    let page_size = T::page_size();
-                    
-                    let start_idx = T::index(va_start);
-                    let end_idx = T::index(va_end - 1);
+        for idx in start_idx..=end_idx {
+            let entry_va = table_base_va.add_bytes(idx * table_coverage);
 
-                    let mut current_va = va_start;
-                    let mut current_pa = pa_start;
+            let desc = unsafe {
+                ctx.mapper
+                    .with_page_table(table_pa, |pgtable| T::from_ptr(pgtable).get_desc(entry_va))?
+            };
 
-                    for i in start_idx..=end_idx {
-                        let entry = &mut (*table).entries[i];
-                        
-                        let slot_boundary = (current_va & !(page_size - 1)) + page_size;
-                        let chunk_end = cmp::min(va_end, slot_boundary);
-                        let chunk_len = chunk_end - current_va;
+            if let Some(next_desc) = desc.next_table_address() {
+                let sub_region = VirtMemoryRegion::new(entry_va, table_coverage)
+                    .intersection(region)
+                    .expect("Sub region should overlap with parent region");
 
-                        if T::is_leaf() {
-                            let flags = Self::make_flags(attrs.perms);
-                            let pte = PageDescriptor::new(PA::from_value(current_pa), flags);
-                            *entry = pte;
-                            invalidator.invalidate_page(VA::from_value(current_va));
-                        } else {
-                            use crate::arch::riscv64::memory::pg_descriptors::PageTableEntry;
-                            let child_pa = if entry.is_valid() && entry.is_table() {
-                                entry.output_address()
-                            } else {
-                                let new_table = allocator.allocate_page_table::<T::NextLevel>()?;
-                                *entry = PageDescriptor::new(new_table.to_untyped(), PteFlags::VALID);
-                                new_table.to_untyped()
-                            };
-
-                            if children_count < 512 {
-                                children_to_visit[children_count] = (i as u16, child_pa);
-                                children_count += 1;
-                            }
-                        }
-
-                        current_va += chunk_len;
-                        current_pa += chunk_len;
-                    }
-                    Ok(())
-                })?; 
+                T::NextLevel::walk(next_desc.cast(), sub_region, ctx, modifier)?;
+            } else if desc.is_valid() {
+                Err(MapError::NotL3Mapped)?
+            } else {
+                continue;
             }
         }
 
-        for i in 0..children_count {
-            let (idx, child_pa) = children_to_visit[i];
-            let idx = idx as usize;
-            let page_size = T::page_size();
-            let start_idx = T::index(va_start);
-            let idx_base_va = (va_start & !(page_size - 1)) + (idx - start_idx) * page_size;
-            let chunk_start = cmp::max(va_start, idx_base_va);
-            let chunk_end = cmp::min(va_end, idx_base_va + page_size);
-            let chunk_pa = pa_start + (chunk_start - va_start);
-
-            if !T::is_leaf() {
-                Walk::<T::NextLevel>::map_range_internal(
-                    TPA::from_value(child_pa.value()),
-                    chunk_start, chunk_end, chunk_pa, attrs, ctx
-                )?;
-            }
-        }
         Ok(())
     }
-    
-    fn make_flags(perms: crate::memory::permissions::PtePermissions) -> PteFlags {
-        let mut flags = PteFlags::VALID | PteFlags::ACCESSED | PteFlags::DIRTY;
-        if perms.is_write() { flags |= PteFlags::WRITE | PteFlags::READ; } 
-        else { flags |= PteFlags::READ; }
-        if perms.is_execute() { flags |= PteFlags::EXECUTE; }
-        if perms.is_user() { flags |= PteFlags::USER; } 
-        else { flags |= PteFlags::GLOBAL; }
-        flags
+}
+
+impl RecursiveWalker for L3Table {
+    fn walk<F, PM>(
+        table_pa: TPA<PgTableArray<Self>>,
+        region: VirtMemoryRegion,
+        ctx: &mut WalkContext<PM>,
+        modifier: &mut F,
+    ) -> Result<()>
+    where
+        PM: PageTableMapper,
+        F: FnMut(VA, L3Descriptor) -> L3Descriptor,
+    {
+        unsafe {
+            ctx.mapper.with_page_table(table_pa, |pgtable| {
+                let table = L3Table::from_ptr(pgtable);
+                for va in region.iter_pages() {
+                    let desc = table.get_desc(va);
+                    if desc.is_valid() {
+                        table.set_desc(va, modifier(va, desc), ctx.invalidator);
+                    }
+                }
+            })
+        }
     }
+}
+
+pub fn walk_and_modify_region<F, PM>(
+    l0_table: TPA<PgTableArray<L0Table>>,
+    region: VirtMemoryRegion,
+    ctx: &mut WalkContext<PM>,
+    mut modifier: F,
+) -> Result<()>
+where
+    PM: PageTableMapper,
+    F: FnMut(VA, L3Descriptor) -> L3Descriptor,
+{
+    if !region.is_page_aligned() {
+        Err(MapError::VirtNotAligned)?;
+    }
+
+    if region.size() == 0 {
+        return Ok(());
+    }
+
+    L0Table::walk(l0_table, region, ctx, &mut modifier)
+}
+
+pub fn get_pte<PM: PageTableMapper>(
+    l0_table: TPA<PgTableArray<L0Table>>,
+    va: VA,
+    mapper: &mut PM,
+) -> Result<Option<L3Descriptor>> {
+    let mut descriptor = None;
+
+    let mut walk_ctx = WalkContext {
+        mapper,
+        invalidator: &NullTlbInvalidator {},
+    };
+
+    walk_and_modify_region(
+        l0_table,
+        VirtMemoryRegion::new(va.page_aligned(), PAGE_SIZE),
+        &mut walk_ctx,
+        |_, pte| {
+            descriptor = Some(pte);
+            pte
+        },
+    )?;
+
+    Ok(descriptor)
 }

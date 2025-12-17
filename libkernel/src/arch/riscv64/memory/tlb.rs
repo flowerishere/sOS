@@ -1,8 +1,5 @@
-pub trait TLBInvalidator {
-    fn invalidate_page(&self, _addr: crate::memory::address::VA) {
-        unsafe { riscv::asm::sfence_vma_all() }; // Simplified, ideally flush specific VA
-    }
-}
+pub trait TLBInvalidator {}
 
-pub struct RiscvTLBInvalidator;
-impl TLBInvalidator for RiscvTLBInvalidator {}
+pub struct NullTlbInvalidator {}
+
+impl TLBInvalidator for NullTlbInvalidator {}

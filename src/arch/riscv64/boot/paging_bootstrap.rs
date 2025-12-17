@@ -71,7 +71,7 @@ impl PageAllocator for StaticPageAllocator {
 struct KernelImageTranslator {}
 
 impl<T> AddressTranslator<T> for KernelImageTranslator {
-    fn virtual_to_physical(_va: libkernel::memory::address::TVA<T>) -> TPA<T> {
+    fn virt_to_phys(_va: libkernel::memory::address::TVA<T>) -> TPA<T> {
         unreachable!("Should only be used to translate PA -> VA")
     }
 

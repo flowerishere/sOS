@@ -26,7 +26,7 @@ pub const KERNEL_STACK_PG_ORDER: usize = (KERNEL_STACK_SZ / PAGE_SIZE).ilog2() a
 
 const KERNEL_HEAP_SZ: usize = 64 * 1024 * 1024; // 64 MiB
 
-pub fn setup_allocator(dtb_ptr: TPA<U8>, image_start: PA, image_end: PA) -> Result<()> {
+pub fn setup_allocator(dtb_ptr: TPA<u8>, image_start: PA, image_end: PA) -> Result<()> {
     //assume the dtb_ptr is valid
     let dt = unsafe { fdt_parser::Fdt::from_ptr(NonNull::new_unchecked(dtb_ptr.as_ptr_mut())) }
         .map_err(|_| KernelError::InvalidValue)?;
