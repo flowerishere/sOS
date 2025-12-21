@@ -7,7 +7,8 @@ edition = "2024"
 members = [ "libkernel" ]
 
 [features]
-default = ["arch-aarch64"]
+#default = ["arch-aarch64"]
+default = ["arch-riscv64"]
 arch-aarch64 = ["dep:aarch64-cpu", "dep:arm-pl011-uart", "libkernel/arch-aarch64"]
 arch-riscv64 = ["dep:riscv", "dep:sbi-rt", "libkernel/arch-riscv64"]
 

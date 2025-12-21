@@ -19,7 +19,7 @@ use crate::{
 };
 use riscv::{
     asm,
-    register::{sstatus, sie, stevc, satp},
+    register::{sstatus, sie, stvec, satp},
 };
 use alloc::string::ToString;
 use core::arch::global_asm;

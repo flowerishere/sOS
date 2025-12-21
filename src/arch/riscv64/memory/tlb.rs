@@ -1,15 +1,17 @@
 use core::arch::asm;
-//use libkernel::arch::riscv64::memory::tlb::TLBInvalidator;
-
+use libkernel::arch::riscv64::memory::tlb::TLBInvalidator;
+use libkernel::memory::address::VA;
 /// Trait definition (usually imported from common or defined here if specific)
 /// Assuming TLBInvalidator is defined in common `libkernel` or we define the trait here.
 /// Based on ARM code, it seems `TLBInvalidator` is a trait. 
 /// If it's not in libkernel common, we define it:
-pub trait TLBInvalidator {}
 
 pub struct NullTlbInvalidator;
-impl TLBInvalidator for NullTlbInvalidator {}
+impl TLBInvalidator for NullTlbInvalidator {
+    fn invalidate_page(&self, _va: VA) {}
+}
 
+#[derive(Clone, Debug)]
 pub struct AllTlbInvalidator;
 
 impl AllTlbInvalidator {
@@ -27,8 +29,6 @@ impl Drop for AllTlbInvalidator {
         }
     }
 }
-
-impl TLBInvalidator for AllTlbInvalidator {}
 
 // RISC-V usually doesn't distinguish EL1/EL0 flushes in the same way.
 // We can use the same invalidator for both contexts or specifically flush ASIDs.

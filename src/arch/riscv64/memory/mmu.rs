@@ -33,7 +33,7 @@ impl RiscvKernelAddressSpace {
         let mut ctx = MappingContext {
             allocator: &mut PageTableAllocator::new(),
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl1TlbInvalidator::new(),
+            invalidator: &AllEl1TlbInvalidator,
         };
 
         map_range(self.kernel_l0, map_attrs, &mut ctx)
