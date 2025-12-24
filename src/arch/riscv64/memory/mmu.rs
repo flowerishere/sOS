@@ -6,6 +6,7 @@ use libkernel::{
         pg_descriptors::{MemoryType, PaMapper},
         pg_tables::{RvPageTableRoot, MapAttributes, MappingContext, PgTableArray, map_range},
         pg_walk::get_pte,
+        tlb::TLBInvalidator,
     },
     error::Result,
     memory::{
@@ -17,6 +18,7 @@ use libkernel::{
 
 pub mod page_allocator;
 pub mod page_mapper;
+pub mod smalloc_page_allocator;
 
 use self::page_allocator::PageTableAllocator;
 use self::page_mapper::PageOffsetPgTableMapper;
@@ -33,7 +35,7 @@ impl RiscvKernelAddressSpace {
         let mut ctx = MappingContext {
             allocator: &mut PageTableAllocator::new(),
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl1TlbInvalidator,
+            invalidator: &AllEl1TlbInvalidator {},
         };
 
         map_range(self.kernel_l0, map_attrs, &mut ctx)

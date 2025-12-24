@@ -130,7 +130,7 @@ pub fn setup_stack_and_heap(pgtbl_base: TPA<PgTableArray<L0Table>>) -> Result<VA
         allocator: &mut pg_alloc,
         //use pageoffsetmapper because physmap is already set up in mod.rs
         mapper: &mut PageOffsetPgTableMapper {},
-        invalidator: &SfenceTlbInvalidator::new(),
+        invalidator: &SfenceTlbInvalidator,
     };
     map_range(
         pgtbl_base,

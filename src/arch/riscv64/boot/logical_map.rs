@@ -71,7 +71,7 @@ pub fn setup_logical_map(pgtbl_base: TPA<PgTableArray<L0Table>>) -> Result<()> {
     let mut pg_alloc = SmallocPageAlloc::new(alloc);
     
     // 创建 TLB 失效器
-    let invalidator = SfenceTlbInvalidator::new();
+    let invalidator = SfenceTlbInvalidator;
 
     // 3. 构建映射上下文
     let mut ctx = MappingContext {
@@ -84,14 +84,13 @@ pub fn setup_logical_map(pgtbl_base: TPA<PgTableArray<L0Table>>) -> Result<()> {
     for mem_region in mem_list.iter() {
         // 构造映射属性
         let map_attrs = MapAttributes {
-            phys: *mem_region, // PhysMemoryRegion 通常实现了 Copy
+            phys: mem_region, // PhysMemoryRegion 通常实现了 Copy
             virt: mem_region.map_via::<PageOffsetTranslator>(),
             mem_type: MemoryType::Normal, // 普通内存（Cacheable）
             perms: PtePermissions::rw(false), // RW 权限，不可执行(X=0)，仅限内核(U=0)
         };
 
         // 执行映射
-        // 注意：这里调用的是 libkernel 中的 map_range
         map_range(pgtbl_base, map_attrs, &mut ctx)?;
     }
 

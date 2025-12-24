@@ -13,7 +13,8 @@ use libkernel::{
     error::Result,
     memory::{address::VA, proc_vm::vmarea::AccessKind, region::VirtMemoryRegion},
 };
-use riscv::register::scause::{self, Exception};
+//use riscv::register::scause;
+use riscv::interrupt::Exception;
 
 #[repr(C)]
 struct FixupTable {
@@ -41,17 +42,12 @@ pub fn handle_page_fault(stval: usize, cause: Exception, tf: &mut TrapFrame) -> 
         _ => panic!("handle_page_fault called with non-fault cause"),
     };
 
-    // 检查特权级：如果触发异常时是 User Mode (SPP=0)，则是普通用户缺页
-    // sstatus.SPP 在 TrapFrame 中通常需要手动保存或通过 sstatus 判断
-    // RISC-V sstatus SPP 位是 bit 8. 0 = User, 1 = Supervisor.
     let is_kernel_fault = (tf.sstatus & (1 << 8)) != 0;
 
     if is_kernel_fault {
         handle_kernel_mem_fault(fault_addr, access_kind, tf);
         return Ok(());
     }
-
-    // 用户态缺页处理
     match run_mem_fault_handler(fault_addr, access_kind) {
         Ok(FaultResolution::Resolved) => Ok(()),
         Ok(FaultResolution::Denied) => {

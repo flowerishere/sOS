@@ -5,7 +5,7 @@ use riscv::{
     register::sstatus,
 };
 
-use cpu_ops::{local_irq_restore, local_irq_save};
+//use cpu_ops::{local_irq_restore, local_irq_save};
 use exceptions::TrapFrame;
 use libkernel::{
     CpuOps, VirtualMemory,
@@ -17,7 +17,7 @@ use memory::{
     PAGE_OFFSET,
     address_space::RiscvProcessAddressSpace,
     mmu::{RiscvKernelAddressSpace, KERN_ADDR_SPACE},
-    uaccess::{RiscvCopyFromUser, RiscvCopyStrnFromUser, RiscvCopyToUser},
+    uaccess::{Riscv64CopyFromUser, Riscv64CopyStrnFromUser, Riscv64CopyToUser},
 };
 
 use crate::{
@@ -31,12 +31,12 @@ use crate::{
 use super::Arch;
 
 pub mod boot;
-mod cpu_ops;
+pub mod cpu_ops;
 pub mod exceptions;
-// mod fdt; // 如果你有 RISC-V 特定的 FDT 处理逻辑，取消注释
 mod memory;
 mod proc;
-pub mod sbi; // 建议创建一个简单的 sbi.rs 模块或直接使用 sbi-rt
+pub mod sbi;
+pub mod fdt;
 
 /// RISC-V 64 Architecture Provider
 pub struct Riscv64;
@@ -44,7 +44,6 @@ pub struct Riscv64;
 
 
 impl VirtualMemory for Riscv64 {
-    // RISC-V SV39/48 的页表根类型
     type PageTableRoot = RvPageTableRoot;
     type ProcessAddressSpace = RiscvProcessAddressSpace;
     type KernelAddressSpace = RiscvKernelAddressSpace;
@@ -117,7 +116,7 @@ impl Arch for Riscv64 {
         dst: *mut (),
         len: usize,
     ) -> impl Future<Output = Result<()>> {
-        RiscvCopyFromUser::new(src, dst, len)
+        Riscv64CopyFromUser::new(src, dst, len)
     }
 
     unsafe fn copy_to_user(
@@ -125,7 +124,7 @@ impl Arch for Riscv64 {
         dst: UA,
         len: usize,
     ) -> impl Future<Output = Result<()>> {
-        RiscvCopyToUser::new(src, dst, len)
+        Riscv64CopyToUser::new(src, dst, len)
     }
 
     unsafe fn copy_strn_from_user(
@@ -133,6 +132,6 @@ impl Arch for Riscv64 {
         dst: *mut u8,
         len: usize,
     ) -> impl Future<Output = Result<usize>> {
-        RiscvCopyStrnFromUser::new(src, dst as *mut _, len)
+        Riscv64CopyStrnFromUser::new(src, dst as *mut _, len)
     }
 }

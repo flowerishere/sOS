@@ -20,7 +20,7 @@ use libkernel::{
         page::PageFrame,
         permissions::PtePermissions,
         region::{PhysMemoryRegion, VirtMemoryRegion},
-        PageOffsetTranslator,
+        pg_offset::PageOffsetTranslator,
     },
 };
 use riscv::register::satp;
@@ -46,12 +46,19 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
         // Sv48: Kernel is at 0xFFFF_8000_..., which corresponds to the higher indices of L0.
         // We assume KERN_ADDR_SPACE is initialized.
         if let Some(kern_lock) = KERN_ADDR_SPACE.get() {
-            let kern_as = kern_lock.lock();
+            let kern_as = kern_lock.lock_save_irq();
             let kern_l0_pa = kern_as.table_pa();
             
             unsafe {
-                let kern_l0_ptr = TVA::from_value(kern_l0_pa.value()).to_va::<PageOffsetTranslator>().as_ptr::<u64>();
-                let user_l0_ptr = TVA::from_value(l0_table.value()).to_va::<PageOffsetTranslator>().as_ptr_mut::<u64>();
+                let kern_l0_ptr = kern_l0_pa
+                    .cast::<u64>() 
+                    .to_va::<PageOffsetTranslator<Sv48>>() 
+                    .as_ptr();
+                
+                let user_l0_ptr = l0_table
+                    .cast::<u64>()
+                    .to_va::<PageOffsetTranslator<Sv48>>()
+                    .as_ptr_mut();
 
                 // In Sv48 (4 levels, 512 entries), the address space is split in half.
                 // Lower half (0x0...0x7F...) is user, Upper half (0x80...0xFF...) is kernel.
@@ -87,7 +94,7 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
         // Or simply do nothing if the scheduler immediately switches to another task.
         // But for correctness, let's load the kernel root.
         if let Some(kern_lock) = KERN_ADDR_SPACE.get() {
-            let kern_as = kern_lock.lock();
+            let kern_as = kern_lock.lock_save_irq();
             let ppn = kern_as.table_pa().value() >> 12;
             unsafe {
                 satp::set(satp::Mode::Sv48, 0, ppn);

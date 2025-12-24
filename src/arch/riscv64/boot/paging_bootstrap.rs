@@ -5,7 +5,7 @@ use libkernel::arch::riscv64::memory::pg_tables::{
     L0Table, MapAttributes, MappingContext, PageAllocator, PageTableMapper, PgTable, PgTableArray,
     map_range,
 };
-use libkernel::arch::riscv64::memory::tlb::SfenceTlbInvalidator;
+use libkernel::arch::riscv64::memory::tlb::AllTlbInvalidator;
 use libkernel::error::{KernelError, Result};
 use libkernel::memory::address::{AddressTranslator, IdentityTranslator, PA, TPA, TVA};
 use libkernel::memory::permissions::PtePermissions;
@@ -101,14 +101,14 @@ fn do_paging_bootstrap(static_pages: PA, image_addr:PA, fdt_addr: PA) -> Result<
     let root_table_pa = bump_alloc.allocate_page_table::<L0Table>()?;
     //IDMAP kernel image
     let image_size = unsafe {
-        (__image_end.as_ptr() as usize) - (__image_start.as_ptr() as usize)
+        (&__image_end as *const _ as usize) - (&__image_start as *const _ as usize)
     };
     let kernel_range = PhysMemoryRegion::new(image_addr, image_size);
 
     let mut translator = IdmapTranslator {};
     //RISC-V sfence.vma based invalidator usually not needed before MMU enabled
     //a Null one
-    let invalidator = NullTlbInvalidator {};
+    let invalidator = AllTlbInvalidator {};
 
     let mut bootstrap_ctx = MappingContext {
         allocator: &mut bump_alloc,
@@ -143,9 +143,9 @@ fn do_paging_bootstrap(static_pages: PA, image_addr:PA, fdt_addr: PA) -> Result<
     )?;
 
     //Enable MMU logic
-    enable_mmu(root_table_pa);
+    enable_mmu(root_table_pa.to_untyped());
 
-    Ok(root_table.to_untyped())
+    Ok(root_table_pa.to_untyped())
 }
 
 #[unsafe(no_mangle)]
@@ -160,7 +160,7 @@ pub extern "C" fn enable_mmu(root_table_pa: PA) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn paging_bootstrap(static_pages: PA, image_addr: PA, fdt_addr: PA,) -> PA {
-    let res = do_paging_bootstrap(static_pages, image_phys_addr, fdt_addr);
+    let res = do_paging_bootstrap(static_pages, image_addr, fdt_addr);
 
     if let Ok(addr) = res {
         addr

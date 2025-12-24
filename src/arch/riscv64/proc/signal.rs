@@ -70,7 +70,7 @@ pub async fn do_signal(id: SigId, sa: UserspaceSigAction) -> Result<TrapFrame> {
     new_state.regs[1] = sa.restorer.unwrap().value() as _;
     
     // 4. 设置第一个参数 a0 (x10) 为信号 ID
-    new_state.regs[10] = id.user_id();
+    new_state.regs[10] = id.user_id() as usize;
 
     Ok(new_state)
 }

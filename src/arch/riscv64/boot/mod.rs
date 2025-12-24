@@ -71,7 +71,7 @@ fn arch_init_stage1(
 ) -> VA {
     (|| -> Result<VA> {
         setup_console_logger();
-        setup_allocator(dtb_addr, image_start, image_end)?;
+        setup_allocator(dtb_ptr, image_start, image_end)?;
         let dtb_addr = {
             let mut fixmaps = FIXMAPS.lock_save_irq();
             fixmaps.setup_fixmaps(highmem_pgtable_base);
