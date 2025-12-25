@@ -14,10 +14,11 @@ qemu-system-riscv64 \
     -device virtio-blk-device,scsi=off,drive=foo \
     -nographic \
     -serial mon:stdio \
-    -bios none \
+    -bios default \
     -device virtio-rng-device \
     -device virtio-gpu-device \
     -device virtio-net-device \
     -device virtio-tablet-device \
     -device virtio-keyboard-device \
-    -kernel "$elf"
+    -kernel "$elf"\
+    -nographic\

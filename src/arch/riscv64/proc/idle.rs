@@ -56,6 +56,11 @@ pub fn create_idle_task() -> Task {
         regs: [0; 32],
         sstatus: 0,
         sepc: code_addr.value(),
+        stval: 0,
+        scause: 0,
+        kernel_satp: 0,
+        kernel_sp: 0,
+        kernel_trap: 0,
     };
     
     // 配置 sstatus:

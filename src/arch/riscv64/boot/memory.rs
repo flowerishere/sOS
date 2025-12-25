@@ -2,14 +2,15 @@ use crate::arch::riscv64::memory::{
     HEAP_ALLOCATOR,
     mmu::{page_mapper::PageOffsetPgTableMapper, smalloc_page_allocator::SmallocPageAlloc},
     set_kimage_start,
-    tlb::SfenceTlbInvalidator,
+    //tlb::SfenceTlbInvalidator,
 };
 use crate::memory::INITAL_ALLOCATOR;
 use core::ptr::NonNull;
 use libkernel::{
     arch::riscv64::memory::{
         pg_descriptors::MemoryType,
-        pg_tables::{L0Table, MapAttributes, MappingContext, PgTableArray, map_range},
+        pg_tables::{L0Table, MapAttributes, MappingContext, PgTableArray, map_range}, 
+        tlb::AllTlbInvalidator,
     },
     error::{KernelError, Result},
     memory::{
@@ -130,7 +131,7 @@ pub fn setup_stack_and_heap(pgtbl_base: TPA<PgTableArray<L0Table>>) -> Result<VA
         allocator: &mut pg_alloc,
         //use pageoffsetmapper because physmap is already set up in mod.rs
         mapper: &mut PageOffsetPgTableMapper {},
-        invalidator: &SfenceTlbInvalidator,
+        invalidator: &AllTlbInvalidator {},
     };
     map_range(
         pgtbl_base,

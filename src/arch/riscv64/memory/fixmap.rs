@@ -25,6 +25,7 @@ use libkernel::{
             L0Table, L1Table, L2Table, L3Table,
             PgTable, PgTableArray
         },
+        tlb::AllTlbInvalidator,
     },
     error::{KernelError, Result},
     memory::{
@@ -131,7 +132,7 @@ impl Fixmap {
     /// 将内部表挂载到内核根页表 (root_base) 上
     pub fn setup_fixmaps(&mut self, root_base: TPA<PgTableArray<RvRoot>>) {
         let root_table = RvRoot::from_ptr(root_base.to_va::<IdentityTranslator>());
-        let invalidator = RvTlbInvalidator::new();
+        let invalidator = AllTlbInvalidator {};
 
         // 1. 挂载 L1 到 Root (L0) 的 FIXMAP_BASE 位置
         root_table.set_desc(
@@ -176,7 +177,7 @@ impl Fixmap {
 
         let mut phys_region = PhysMemoryRegion::new(fdt_ptr.to_untyped(), sz);
         let mut va = FIXMAP_BASE;
-        let invalidator = RvTlbInvalidator::new();
+        let invalidator = AllTlbInvalidator {};
 
         // 使用 l3[0] 进行映射
         while phys_region.size() > 0 {
@@ -203,7 +204,7 @@ impl Fixmap {
         pa: TPA<PgTableArray<T>>,
     ) -> Result<TempFixmapGuard<PgTableArray<T>>> {
         let va = Self::va_for_slot(FixmapSlot::PgTableTmp);
-        let invalidator = RvTlbInvalidator::new();
+        let invalidator = AllTlbInvalidator {};
 
         // 使用 l3[1] 进行映射
         RvLeaf::from_ptr(TVA::from_ptr_mut(&mut self.l3[1] as *mut _)).set_desc(
@@ -224,7 +225,7 @@ impl Fixmap {
 
     fn unmap_temp_page(&mut self) {
         let va = Self::va_for_slot(FixmapSlot::PgTableTmp);
-        let invalidator = RvTlbInvalidator::new();
+        let invalidator = AllTlbInvalidator {};
 
         RvLeaf::from_ptr(TVA::from_ptr_mut(&mut self.l3[1] as *mut _)).set_desc(
             va,

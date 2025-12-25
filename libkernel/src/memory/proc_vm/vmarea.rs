@@ -57,7 +57,7 @@ impl VMAPermissions {
 }
 
 /// Describes the kind of access that occured during a page fault.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AccessKind {
     /// The CPU attempted to read the faulting address.
     Read,

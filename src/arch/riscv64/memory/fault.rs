@@ -70,7 +70,7 @@ fn run_mem_fault_handler(fault_addr: VA, access_kind: AccessKind) -> Result<Faul
     let task = current_task();
     let mut vm = task.vm.lock_save_irq();
 
-    let pg_info = vm.mm().address_space().translate(fault_addr);
+    let pg_info = vm.mm.address_space_mut().translate(fault_addr);
 
     match pg_info {
         Some(info) => handle_protection_fault(&mut vm, fault_addr, access_kind, info),

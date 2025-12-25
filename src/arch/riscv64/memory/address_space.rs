@@ -1,7 +1,6 @@
 use crate::memory::PAGE_ALLOC;
 use super::{
     mmu::{page_allocator::PageTableAllocator, page_mapper::PageOffsetPgTableMapper, KERN_ADDR_SPACE},
-    tlb::AllEl0TlbInvalidator,
 };
 use alloc::vec::Vec;
 use libkernel::{
@@ -9,9 +8,10 @@ use libkernel::{
     arch::riscv64::memory::{
         pg_descriptors::{L3Descriptor, MemoryType, PaMapper, PageTableEntry},
         pg_tables::{
-            RvPageTableRoot, MapAttributes, MappingContext, PageAllocator, PgTableArray, map_range, PgTable,
+            RvPageTableRoot, MapAttributes, MappingContext, PageAllocator, PgTableArray, map_range, PgTable
         },
         pg_walk::{WalkContext, get_pte, walk_and_modify_region},
+        tlb::AllTlbInvalidator,
     },
     error::{KernelError, MapError, Result},
     memory::{
@@ -24,8 +24,9 @@ use libkernel::{
     },
 };
 use riscv::register::satp;
-
+use crate::arch::ArchImpl;
 pub struct RiscvProcessAddressSpace {
+    // 使用 RvPageTableRoot (即 L0Table)
     l0_table: TPA<PgTableArray<RvPageTableRoot>>,
 }
 
@@ -37,33 +38,30 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
     where
         Self: Sized,
     {
-        // 1. Allocate a new empty L0 table
+        // 1. 分配一个新的空 L0 表
         let l0_table = PageTableAllocator::new().allocate_page_table::<RvPageTableRoot>()?;
 
-        // 2. CRITICAL FOR RISC-V: Copy Kernel Mappings.
-        // Since SATP handles both user and kernel space, we must copy the upper half 
-        // mappings from the kernel page table to this new process page table.
-        // Sv48: Kernel is at 0xFFFF_8000_..., which corresponds to the higher indices of L0.
-        // We assume KERN_ADDR_SPACE is initialized.
+        // 2. RISC-V 关键步骤：复制内核映射
+        // Sv48 模式下，内核位于高地址 (0xFFFF_8000_...)，对应 L0 表的高索引部分。
+        // L0 表有 512 个条目，用户空间是 0-255，内核空间是 256-511。
         if let Some(kern_lock) = KERN_ADDR_SPACE.get() {
             let kern_as = kern_lock.lock_save_irq();
             let kern_l0_pa = kern_as.table_pa();
             
             unsafe {
+                // 将物理地址转换为虚拟地址以便 CPU 访问进行 memcpy
                 let kern_l0_ptr = kern_l0_pa
                     .cast::<u64>() 
-                    .to_va::<PageOffsetTranslator<Sv48>>() 
+                    .to_va::<PageOffsetTranslator<ArchImpl>>() 
                     .as_ptr();
                 
                 let user_l0_ptr = l0_table
+                    .to_untyped()
                     .cast::<u64>()
-                    .to_va::<PageOffsetTranslator<Sv48>>()
+                    .to_va::<PageOffsetTranslator<ArchImpl>>()
                     .as_ptr_mut();
 
-                // In Sv48 (4 levels, 512 entries), the address space is split in half.
-                // Lower half (0x0...0x7F...) is user, Upper half (0x80...0xFF...) is kernel.
-                // The split happens exactly at index 256.
-                // We copy entries 256 to 511.
+                // 复制后半部分 (内核空间)
                 let start_idx = 256;
                 let count = 256;
                 
@@ -79,20 +77,18 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
     }
 
     fn activate(&self) {
-        // Switch SATP to this process's page table.
-        // Mode 9 = Sv48. ASID = 0 (for simplicity now, or manage ASIDs later).
+        // 切换 SATP 到当前进程的页表
+        // Mode::Sv48 来自 riscv crate，而不是 pg_tables
         let ppn = self.l0_table.value() >> 12;
         unsafe {
             satp::set(satp::Mode::Sv48, 0, ppn);
-            // Flush TLB to apply new address space
+            // 刷新 TLB
             riscv::asm::sfence_vma_all(); 
         }
     }
 
     fn deactivate(&self) {
-        // Switch back to Kernel-only page table (usually Idle thread's table).
-        // Or simply do nothing if the scheduler immediately switches to another task.
-        // But for correctness, let's load the kernel root.
+        // 切换回内核页表 (通常是 Idle 线程的页表)
         if let Some(kern_lock) = KERN_ADDR_SPACE.get() {
             let kern_as = kern_lock.lock_save_irq();
             let ppn = kern_as.table_pa().value() >> 12;
@@ -107,7 +103,7 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
         let mut ctx = MappingContext {
             allocator: &mut PageTableAllocator::new(),
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl0TlbInvalidator::new(),
+            invalidator: &AllTlbInvalidator{},
         };
 
         map_range(
@@ -129,12 +125,12 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
     fn protect_range(&mut self, va_range: VirtMemoryRegion, perms: PtePermissions) -> Result<()> {
         let mut walk_ctx = WalkContext {
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl0TlbInvalidator::new(),
+            invalidator: &AllTlbInvalidator{},
         };
 
         walk_and_modify_region(self.l0_table, va_range, &mut walk_ctx, |_, desc| {
-            // Sv48 PTEs usually don't support explicit "swapped" bits in hardware,
-            // but we use software defined bits.
+            // Sv48 PTE 通常硬件不支持显式的 "swapped" 位
+            // 这里利用软件定义位来标记
             match (perms.is_execute(), perms.is_read(), perms.is_write()) {
                 (false, false, false) => desc.mark_as_swapped(),
                 _ => desc.set_permissions(perms),
@@ -145,7 +141,7 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
     fn unmap_range(&mut self, va_range: VirtMemoryRegion) -> Result<Vec<PageFrame>> {
         let mut walk_ctx = WalkContext {
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl0TlbInvalidator::new(),
+            invalidator: &AllTlbInvalidator {},
         };
         let mut claimed_pages = Vec::new();
 
@@ -162,7 +158,7 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
     fn remap(&mut self, va: VA, new_page: PageFrame, perms: PtePermissions) -> Result<PageFrame> {
         let mut walk_ctx = WalkContext {
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl0TlbInvalidator::new(),
+            invalidator: &AllTlbInvalidator, // 修改这里
         };
 
         let mut old_pte = None;
@@ -203,22 +199,23 @@ impl UserAddressSpace for RiscvProcessAddressSpace {
     {
         let mut walk_ctx = WalkContext {
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl0TlbInvalidator::new(),
+            invalidator: &AllTlbInvalidator, // 修改这里
         };
 
         walk_and_modify_region(self.l0_table, region, &mut walk_ctx, |va, pgd| {
             if let Some(addr) = pgd.mapped_address() {
+                // COW 逻辑：克隆页面，增加引用计数
                 let page_region = PhysMemoryRegion::new(addr, PAGE_SIZE);
                 let alloc1 = unsafe { PAGE_ALLOC.get().unwrap().alloc_from_region(page_region) };
                 
-                // Ref count logic
+                // 增加引用计数 (Leak 两次是为了模拟引用计数增加，具体取决于你的 FrameAllocator 实现)
                 alloc1.clone().leak();
                 alloc1.leak();
 
                 let mut ctx = MappingContext {
                     allocator: &mut PageTableAllocator::new(),
                     mapper: &mut PageOffsetPgTableMapper {},
-                    invalidator: &AllEl0TlbInvalidator::new(),
+                    invalidator: &AllTlbInvalidator, // 修改这里
                 };
 
                 map_range(

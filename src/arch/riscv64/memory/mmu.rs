@@ -4,9 +4,9 @@ use libkernel::{
     KernAddressSpace,
     arch::riscv64::memory::{
         pg_descriptors::{MemoryType, PaMapper},
-        pg_tables::{RvPageTableRoot, MapAttributes, MappingContext, PgTableArray, map_range},
+        pg_tables::{MapAttributes, MappingContext, PgTableArray, RvPageTableRoot, map_range},
         pg_walk::get_pte,
-        tlb::TLBInvalidator,
+        tlb::{AllTlbInvalidator, TLBInvalidator},
     },
     error::Result,
     memory::{
@@ -35,7 +35,7 @@ impl RiscvKernelAddressSpace {
         let mut ctx = MappingContext {
             allocator: &mut PageTableAllocator::new(),
             mapper: &mut PageOffsetPgTableMapper {},
-            invalidator: &AllEl1TlbInvalidator {},
+            invalidator: &AllTlbInvalidator {},
         };
 
         map_range(self.kernel_l0, map_attrs, &mut ctx)

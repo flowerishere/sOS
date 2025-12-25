@@ -60,13 +60,22 @@ impl Arch for Riscv64 {
     type UserContext = TrapFrame;
 
     fn new_user_context(entry_point: VA, stack_top: VA) -> Self::UserContext {
-        let mut ctx = TrapFrame::default();
+        let mut ctx = TrapFrame {
+            regs: [0; 32],       // 初始化 32 个通用寄存器为 0
+            sstatus: 0,          // 初始状态寄存器
+            kernel_satp: 0,      // 内核页表 (如果你的 TrapFrame 定义包含这些)
+            kernel_sp: 0,        // 内核栈指针
+            kernel_trap: 0,      // 内核中断处理入口
+            sepc: 0,
+            scause: 0,
+            stval: 0,
+        }; 
         
         // 设置程序计数器 (sepc)
         ctx.sepc = entry_point.value();
         
         // 设置栈指针 (x2/sp)
-        ctx.x[2] = stack_top.value();
+        ctx.regs[2] = stack_top.value();
         
         // 设置初始状态：
         // SPIE (Bit 5) = 1: 确保 sret 返回用户态后开启中断

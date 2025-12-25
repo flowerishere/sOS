@@ -5,7 +5,7 @@ use crate::memory::{INITAL_ALLOCATOR, PageOffsetTranslator};
 use super::super::memory::{
     fixmap::{FIXMAPS, Fixmap},
     mmu::smalloc_page_allocator::SmallocPageAlloc,
-    tlb::SfenceTlbInvalidator, 
+    //tlb::SfenceTlbInvalidator, 
 };
 
 use libkernel::{
@@ -15,6 +15,7 @@ use libkernel::{
             L0Table, MapAttributes, MappingContext, PageTableMapper, PgTable, PgTableArray,
             map_range,
         },
+        tlb::AllTlbInvalidator,
     },
     error::Result,
     memory::{
@@ -71,7 +72,7 @@ pub fn setup_logical_map(pgtbl_base: TPA<PgTableArray<L0Table>>) -> Result<()> {
     let mut pg_alloc = SmallocPageAlloc::new(alloc);
     
     // 创建 TLB 失效器
-    let invalidator = SfenceTlbInvalidator;
+    let invalidator = AllTlbInvalidator {};
 
     // 3. 构建映射上下文
     let mut ctx = MappingContext {

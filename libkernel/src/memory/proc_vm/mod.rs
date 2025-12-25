@@ -15,7 +15,7 @@ pub mod vmarea;
 const BRK_PERMISSIONS: VMAPermissions = VMAPermissions::rw();
 
 pub struct ProcessVM<AS: UserAddressSpace> {
-    mm: MemoryMap<AS>,
+    pub mm: MemoryMap<AS>,
     brk: VirtMemoryRegion,
 }
 
