@@ -49,7 +49,8 @@ use libkernel::{
     error::{KernelError, Result},
     fs::{OpenFlags, attr::FilePermissions},
 };
-
+#[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
+pub mod ns16550;
 //pub mod bcm2835_aux;
 // Guard architecture specific drivers
 #[cfg(any(feature = "arch-aarch64", target_arch = "aarch64"))]

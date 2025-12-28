@@ -1,4 +1,4 @@
-use super::{MMIO_BASE, tlb::AllEl1TlbInvalidator};
+use super::MMIO_BASE;
 use crate::sync::{OnceLock, SpinLock};
 use libkernel::{
     KernAddressSpace,

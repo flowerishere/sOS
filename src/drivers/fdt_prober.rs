@@ -6,7 +6,7 @@ use libkernel::{
     error::{KernelError, ProbeError},
     memory::address::TVA,
 };
-use log::{error, warn};
+use log::{debug, error, warn};
 
 static mut FDT: TVA<u8> = TVA::from_value(usize::MAX);
 
@@ -19,14 +19,25 @@ pub fn get_fdt() -> Fdt<'static> {
         panic!("Attempted to access FDT VA before set");
     }
 
+    // SAFETY: FDT pointer is assumed to be valid and static for the lifetime of the kernel
     unsafe { Fdt::from_ptr(NonNull::new_unchecked(FDT.as_ptr_mut())).unwrap() }
 }
 
+/// Checks if a node is a root interrupt controller.
+/// 
+/// Returns false if the node is not an interrupt controller at all.
 pub fn is_intc_root(node: &fdt_parser::Node) -> bool {
-    assert!(node.find_property("interrupt-controller").is_some());
+    // Fix: Remove assertion. If it's not an interrupt controller, it's definitely not a root one.
+    // This prevents panic when checking regular devices.
+    if node.find_property("interrupt-controller").is_none() {
+        return false;
+    }
 
     match node.interrupt_parent() {
+        // If interrupt-parent points to itself, it's a root.
         Some(n) if n.node.name == node.name => true,
+        // If no interrupt-parent is specified, usually implies it's a root 
+        // (or inherits from parent node, but for top-level INTCs this holds).
         None => true,
         _ => false,
     }
@@ -37,6 +48,7 @@ pub fn probe_for_fdt_devices() {
     let mut driver_man = DM.lock_save_irq();
     let platform_bus = PLATFORM_BUS.lock_save_irq();
 
+    // 1. Collect all potential device nodes
     let mut to_probe: Vec<_> = fdt
         .all_nodes()
         .filter(|node| {
@@ -60,7 +72,7 @@ pub fn probe_for_fdt_devices() {
     let mut deferred_list = Vec::new();
     let mut progress_made = true;
 
-    // Loop as long as we are successfully probing drivers.
+    // 2. Iterative probing handling dependencies
     while progress_made {
         progress_made = false;
         deferred_list.clear();
@@ -69,16 +81,18 @@ pub fn probe_for_fdt_devices() {
             match platform_bus.probe_device(&mut driver_man, desc.clone()) {
                 Ok(Some(_)) => {
                     progress_made = true;
+                    debug!("FDT: Successfully probed device \"{}\"", desc);
                 }
                 Err(KernelError::Probe(ProbeError::Deferred)) => {
+                    // Dependency missing (e.g. IOMMU or Interrupt Controller), try again later
                     deferred_list.push(desc);
                 }
                 Ok(None) => {
-                    // No driver found for this compatible string. Not an error, just ignore.
+                    // No driver found for this compatible string. Not an error.
                 }
                 Err(e) => {
                     // A fatal error occurred during probe.
-                    error!("Fatal error while probing device \"{}\": {}", desc, e);
+                    error!("FDT: Fatal error while probing device \"{}\": {}", desc, e);
                 }
             }
         }
@@ -89,8 +103,11 @@ pub fn probe_for_fdt_devices() {
         // If we made no progress in a full pass, we are done (or have an unresolvable dependency).
         if !progress_made && !to_probe.is_empty() {
             for desc in &to_probe {
+                // Warning implies a driver claimed support but deferred forever, 
+                // or simply no driver was found (if we kept them in to_probe).
+                // Since we drop Ok(None), these are purely Deferred items.
                 warn!(
-                    "Could not probe device \"{}\" due to missing dependencies.",
+                    "FDT: Could not probe device \"{}\" due to missing dependencies.",
                     desc
                 );
             }

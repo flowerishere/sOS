@@ -38,7 +38,7 @@ mod memory;
 mod process;
 mod sched;
 mod sync;
-
+use crate::drivers::uart::ns16550::Ns16550;
 #[panic_handler]
 fn on_panic(info: &PanicInfo) -> ! {
     ArchImpl::disable_interrupts();
@@ -192,7 +192,7 @@ fn parse_args(args: &str) -> KOptions {
         }
     }
 }
-
+#[unsafe(no_mangle)]
 pub fn kmain(args: String, ctx_frame: *mut UserCtx) {
     sched_init();
 

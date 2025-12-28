@@ -42,8 +42,30 @@ mod memory;
 mod paging_bootstrap;
 mod secondary;
 
-global_asm!(include_str!("start.s"));
+global_asm!(include_str!("start.S"));
+// ==================== 调试辅助函数 ====================
 
+// 直接写 UART 寄存器 (0x1000_0000)，不经过 SBI，避免中断噪音
+fn early_putchar(c: u8) {
+    unsafe {
+        // UART_BASE = 0x1000_0000
+        // THR (Transmitter Holding Register) 是偏移 0 的寄存器
+        // LSR (Line Status Register) 是偏移 5 的寄存器
+        let uart_base = 0x1000_0000 as *mut u8;
+        let lsr = uart_base.add(5);
+        
+        // 等待发送缓冲区为空 (LSR bit 5: THRE)
+        // 这一步在 QEMU 中其实不是必须的，但在真实硬件上很重要
+        // 为防死循环，我们在 QEMU 调试时可以简单地直接写
+        core::ptr::write_volatile(uart_base, c);
+    }
+}
+
+fn early_print(s: &str) {
+    for c in s.bytes() {
+        early_putchar(c);
+    }
+}
 /// Stage 1 Initialize of the system architechture.
 ///
 /// This function is called by the main primary CPU with the other CPUs parked.
@@ -63,36 +85,51 @@ global_asm!(include_str!("start.s"));
 #[unsafe(no_mangle)]
 fn arch_init_stage1(
     dtb_ptr: TPA<u8>,
-    image_start:PA,
-    image_end:PA,
-    // Start.s passes the satp value or root table PA.
-    //accept the Typed Physical Address of the root table to match common style.
+    image_start: PA,
+    image_end: PA,
     highmem_pgtable_base: TPA<PgTableArray<L0Table>>,
 ) -> VA {
     (|| -> Result<VA> {
+        early_print("\n>>> Stage 1 Start\n");
+
         setup_console_logger();
+        
+        early_print("> Setup Allocator...\n");
         setup_allocator(dtb_ptr, image_start, image_end)?;
+        early_print("> Allocator OK\n");
+
         let dtb_addr = {
+            early_print("> Locking Fixmaps...\n");
             let mut fixmaps = FIXMAPS.lock_save_irq();
+            
+            early_print("> Calling setup_fixmaps...\n");
+            // 这里是高危点
             fixmaps.setup_fixmaps(highmem_pgtable_base);
+            early_print("> setup_fixmaps returned\n");
+            
+            early_print("> Remapping FDT...\n");
             unsafe { fixmaps.remap_fdt(dtb_ptr) }.unwrap()
         };
         set_fdt_va(dtb_addr.cast());
 
-        //setup the linear mapping (Physmap)
+        early_print("> Setup Logical Map...\n");
         setup_logical_map(highmem_pgtable_base)?;
 
-        //setup the kernel stack and heap
+        early_print("> Setup Stack/Heap...\n");
         let stack_addr = setup_stack_and_heap(highmem_pgtable_base)?;
 
-        //setup global kernel address space management
+        early_print("> Setup Kern Addr Space...\n");
         setup_kern_addr_space(highmem_pgtable_base)?;
 
+        early_print(">>> Stage 1 Done\n");
         Ok(stack_addr)
     })()
-    .unwrap_or_else(|_| park_cpu())
+    .unwrap_or_else(|e| {
+        // 打印一点错误码提示（虽然此时还没有格式化输出）
+        early_print("\n!!! FATAL ERROR in Stage 1 !!!\n");
+        park_cpu()
+    })
 }
-
 #[unsafe(no_mangle)]
 fn arch_init_stage2(frame: *mut TrapFrame) -> *mut TrapFrame {
     //save the satp(root page table) for booting secondary cpus
