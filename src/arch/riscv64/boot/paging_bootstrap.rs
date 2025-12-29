@@ -16,7 +16,8 @@ use riscv::register::satp;
 use crate::arch::riscv64::memory::IMAGE_BASE;
 use super::park_cpu;
 
-const STATIC_PAGE_COUNT: usize = 128;
+// 给分配器足够的空间
+const STATIC_PAGE_COUNT: usize = 512; 
 const MAX_FDT_SIZE: usize = 2 * 1024 * 1024;
 const SATP_MODE_SV48: usize = 9;
 
@@ -24,6 +25,7 @@ const UART_BASE: u64 = 0x1000_0000;
 const PLIC_BASE: u64 = 0x0c00_0000;
 const CLINT_BASE: u64 = 0x0200_0000;
 
+// [Image Symbols]
 unsafe extern "C" {
     static __image_start: u8;
     static __image_end: u8;
@@ -47,6 +49,27 @@ macro_rules! debug {
     };
 }
 
+// 简单的 Hex 打印工具
+unsafe fn print_hex(mut val: usize) {
+    let hex_chars = b"0123456789abcdef";
+    let mut buf = [0u8; 16];
+    let mut i = 0;
+    
+    if val == 0 {
+        uart_putc(b'0');
+        return;
+    }
+    while val > 0 {
+        buf[i] = hex_chars[val & 0xf];
+        val >>= 4;
+        i += 1;
+    }
+    while i > 0 {
+        i -= 1;
+        uart_putc(buf[i]);
+    }
+}
+
 struct StaticPageAllocator {
     base: PA,
     allocated: usize,
@@ -54,7 +77,7 @@ struct StaticPageAllocator {
 
 impl StaticPageAllocator {
     fn from_phys_adr(addr: PA) -> Self {
-        debug!("[ALLOC] Initializing at 0x");
+        debug!("[ALLOC] Init at Safe Address: 0x");
         unsafe { print_hex(addr.value()); }
         debug!("\n");
         
@@ -74,34 +97,24 @@ impl PageAllocator for StaticPageAllocator {
         }
         
         let ret: TPA<PgTableArray<T>> = TPA::from_value(self.base.add_pages(self.allocated).value());
+        
+        // 安全清零：现在 base 位于 image_end + 2MB，绝对安全
         unsafe {
             ptr::write_bytes(ret.as_ptr_mut() as *mut u8, 0, PAGE_SIZE);
         }
         
         self.allocated += 1;
-        debug!("[ALLOC] Page ");
-        unsafe { print_hex(self.allocated); }
-        debug!("/");
-        unsafe { print_hex(STATIC_PAGE_COUNT); }
-        debug!("\n");
-        
         Ok(ret)
     }
 }
 
 struct KernelImageTranslator {}
-
 impl<T> AddressTranslator<T> for KernelImageTranslator {
-    fn virt_to_phys(_va: TVA<T>) -> TPA<T> {
-        unreachable!()
-    }
-    fn phys_to_virt(_pa: TPA<T>) -> TVA<T> {
-        IMAGE_BASE.cast()
-    }
+    fn virt_to_phys(_va: TVA<T>) -> TPA<T> { unreachable!() }
+    fn phys_to_virt(_pa: TPA<T>) -> TVA<T> { IMAGE_BASE.cast() }
 }
 
 struct IdmapTranslator {}
-
 impl PageTableMapper for IdmapTranslator {
     unsafe fn with_page_table<T: PgTable, R>(
         &mut self,
@@ -113,50 +126,52 @@ impl PageTableMapper for IdmapTranslator {
     }
 }
 
-fn do_paging_bootstrap(static_pages: PA, image_addr: PA, fdt_addr: PA) -> Result<PA> {
-    debug!("\n=== Paging Bootstrap Start ===\n");
-    debug!("[INFO] static_pages = 0x");
-    unsafe { print_hex(static_pages.value()); }
-    debug!("\n[INFO] image_addr   = 0x");
-    unsafe { print_hex(image_addr.value()); }
-    debug!("\n[INFO] fdt_addr     = 0x");
-    unsafe { print_hex(fdt_addr.value()); }
+fn do_paging_bootstrap(_bad_static_pages: PA, image_addr: PA, fdt_addr: PA) -> Result<PA> {
+    debug!("\n=== Paging Bootstrap (Safety Offset Mode) ===\n");
+    
+    let image_start = unsafe { &__image_start as *const _ as usize };
+    let image_end = unsafe { &__image_end as *const _ as usize };
+    
+    debug!("[KERN] Image: 0x"); unsafe { print_hex(image_start); }
+    debug!(" - 0x"); unsafe { print_hex(image_end); }
     debug!("\n");
 
-    let mut bump_alloc = StaticPageAllocator::from_phys_adr(static_pages);
+    let image_size = image_end - image_start;
+
+    // =========================================================================
+    // [Method 2 Implementation] 
+    // 强制偏移 2MB (0x200000) 以避开内核镜像和任何潜在的 footer/padding
+    // =========================================================================
+    let image_end_aligned = (image_end + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+    let offset_2mb = 0x200_000; 
+    let safe_alloc_base_val = image_end_aligned + offset_2mb;
+    let safe_alloc_base = PA::from_value(safe_alloc_base_val);
+
+    debug!("[FIX] Allocator Base = Image End + 2MB = 0x");
+    unsafe { print_hex(safe_alloc_base_val); }
+    debug!("\n");
+
+    let mut bump_alloc = StaticPageAllocator::from_phys_adr(safe_alloc_base);
+
+    // 预留足够大的 Padding (64MB) 确保 Allocator 也在 Identity Map 范围内
+    // Image Start | ... Image ... | ... 2MB Gap ... | Allocator | ... Remaining Padding ...
+    let padding_size = 64 * 1024 * 1024; 
+    let total_map_size = image_size + offset_2mb + (STATIC_PAGE_COUNT * PAGE_SIZE) + padding_size;
+    
+    // 对齐映射大小
+    let map_size_aligned = (total_map_size + 0x200000 - 1) & !(0x200000 - 1); // 2MB 对齐
+
+    debug!("[KERN] Total Mapped Region: ");
+    unsafe { print_hex(map_size_aligned); }
+    debug!(" bytes\n");
+
+    let kernel_range = PhysMemoryRegion::new(image_addr, map_size_aligned);
 
     debug!("[BOOT] Allocating root table...\n");
     let root_table_pa = bump_alloc.allocate_page_table::<L0Table>()?;
-    debug!("[BOOT] Root table at 0x");
+    debug!("[BOOT] Root table PA: 0x");
     unsafe { print_hex(root_table_pa.to_untyped().value()); }
     debug!("\n");
-
-    let image_size = unsafe {
-        let start = &__image_start as *const _ as usize;
-        let end = &__image_end as *const _ as usize;
-        debug!("[KERN] Image range: 0x");
-        print_hex(start);
-        debug!(" - 0x");
-        print_hex(end);
-        debug!("\n");
-        
-        if end <= start {
-            debug!("[ERROR] Invalid image bounds\n");
-            park_cpu();
-        }
-        end - start
-    };
-
-    let padding_size = 64 * 1024 * 1024; 
-    let image_size_with_padding = image_size + padding_size;
-
-    let image_size_aligned = (image_size_with_padding + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
-    
-    debug!("[KERN] Mapping size (with padding) = ");
-    unsafe { print_hex(image_size_aligned); }
-    debug!(" bytes\n");
-
-    let kernel_range = PhysMemoryRegion::new(image_addr, image_size_aligned);
 
     let mut translator = IdmapTranslator {};
     let invalidator = AllTlbInvalidator {};
@@ -166,7 +181,8 @@ fn do_paging_bootstrap(static_pages: PA, image_addr: PA, fdt_addr: PA) -> Result
         invalidator: &invalidator,
     };
 
-    debug!("[MAP] Identity mapping kernel...\n");
+    // 1. Identity Mapping (覆盖 Kernel + 2MB Gap + Allocator)
+    debug!("[MAP] Identity Mapping...\n");
     map_range(
         root_table_pa,
         MapAttributes {
@@ -177,9 +193,9 @@ fn do_paging_bootstrap(static_pages: PA, image_addr: PA, fdt_addr: PA) -> Result
         },
         &mut ctx,
     )?;
-    debug!("[MAP] Identity map OK\n");
 
-    debug!("[MAP] High mapping kernel to IMAGE_BASE...\n");
+    // 2. High Mapping (覆盖 Kernel + 2MB Gap + Allocator)
+    debug!("[MAP] High Mapping...\n");
     map_range(
         root_table_pa,
         MapAttributes {
@@ -190,67 +206,35 @@ fn do_paging_bootstrap(static_pages: PA, image_addr: PA, fdt_addr: PA) -> Result
         },
         &mut ctx,
     )?;
-    debug!("[MAP] High map OK\n");
 
-    debug!("[MAP] Mapping UART...\n");
+    // 3. Devices
+    debug!("[MAP] Mapping Devices...\n");
     let uart_range = PhysMemoryRegion::new(PA::from_value(UART_BASE as usize), PAGE_SIZE);
-    map_range(
-        root_table_pa,
-        MapAttributes {
-            phys: uart_range,
-            virt: uart_range.map_via::<IdentityTranslator>(),
-            mem_type: MemoryType::Normal, 
-            perms: PtePermissions::rw(false),
-        },
-        &mut ctx,
-    )?;
-    debug!("[MAP] UART OK\n");
+    map_range(root_table_pa, MapAttributes {
+        phys: uart_range, virt: uart_range.map_via::<IdentityTranslator>(),
+        mem_type: MemoryType::Normal, perms: PtePermissions::rw(false),
+    }, &mut ctx)?;
 
-    debug!("[MAP] Mapping PLIC...\n");
     let plic_range = PhysMemoryRegion::new(PA::from_value(PLIC_BASE as usize), 0x400000);
-    map_range(
-        root_table_pa,
-        MapAttributes {
-            phys: plic_range,
-            virt: plic_range.map_via::<IdentityTranslator>(),
-            mem_type: MemoryType::Normal,
-            perms: PtePermissions::rw(false),
-        },
-        &mut ctx,
-    )?;
-    debug!("[MAP] PLIC OK\n");
+    map_range(root_table_pa, MapAttributes {
+        phys: plic_range, virt: plic_range.map_via::<IdentityTranslator>(),
+        mem_type: MemoryType::Normal, perms: PtePermissions::rw(false),
+    }, &mut ctx)?;
 
-    debug!("[MAP] Mapping CLINT...\n");
     let clint_range = PhysMemoryRegion::new(PA::from_value(CLINT_BASE as usize), 0x10000);
-    map_range(
-        root_table_pa,
-        MapAttributes {
-            phys: clint_range,
-            virt: clint_range.map_via::<IdentityTranslator>(),
-            mem_type: MemoryType::Normal,
-            perms: PtePermissions::rw(false),
-        },
-        &mut ctx,
-    )?;
-    debug!("[MAP] CLINT OK\n");
+    map_range(root_table_pa, MapAttributes {
+        phys: clint_range, virt: clint_range.map_via::<IdentityTranslator>(),
+        mem_type: MemoryType::Normal, perms: PtePermissions::rw(false),
+    }, &mut ctx)?;
 
-    debug!("[MAP] Mapping FDT...\n");
     let fdt_range = PhysMemoryRegion::new(fdt_addr, MAX_FDT_SIZE);
-    map_range(
-        root_table_pa,
-        MapAttributes {
-            phys: fdt_range,
-            virt: fdt_range.map_via::<IdentityTranslator>(),
-            mem_type: MemoryType::Normal,
-            perms: PtePermissions::rw(false),
-        },
-        &mut ctx,
-    )?;
-    debug!("[MAP] FDT OK\n");
+    map_range(root_table_pa, MapAttributes {
+        phys: fdt_range, virt: fdt_range.map_via::<IdentityTranslator>(),
+        mem_type: MemoryType::Normal, perms: PtePermissions::rw(false),
+    }, &mut ctx)?;
 
     debug!("[MMU] Enabling MMU...\n");
     enable_mmu(root_table_pa.to_untyped());
-    
     
     Ok(root_table_pa.to_untyped())
 }
@@ -258,28 +242,12 @@ fn do_paging_bootstrap(static_pages: PA, image_addr: PA, fdt_addr: PA) -> Result
 #[unsafe(no_mangle)]
 pub extern "C" fn enable_mmu(root_table_pa: PA) {
     let ppn = root_table_pa.value() >> 12;
-    
-    debug!("[MMU] Root PPN = 0x");
-    unsafe { print_hex(ppn); }
-    debug!("\n[MMU] SATP = 0x");
-    
     let satp_value = (SATP_MODE_SV48 << 60) | ppn;
-    unsafe { print_hex(satp_value); }
-    debug!("\n[MMU] Enabling now...\n");
     
-    
-    if ppn > 0x8_0000_0000 {
-        debug!("[ERROR] Invalid PPN\n");
-        park_cpu();
-    }
-
     unsafe {
         satp::write(satp_value);
-        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
         asm::sfence_vma_all();
-        core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
     }
-    
 }
 
 #[unsafe(no_mangle)]
@@ -289,35 +257,9 @@ pub extern "C" fn paging_bootstrap(static_pages: PA, image_addr: PA, fdt_addr: P
             debug!("[SUCCESS] Bootstrap complete\n\n");
             addr
         }
-        Err(e) => {
-            debug!("[FATAL] Bootstrap failed: ");
-            match e {
-                KernelError::NoMemory => debug!("NoMemory\n"),
-                _ => debug!("Unknown error\n"),
-            }
+        Err(_) => {
+            debug!("[FATAL] Bootstrap failed\n");
             park_cpu()
         }
-    }
-}
-
-unsafe fn print_hex(mut val: usize) {
-    let hex_chars = b"0123456789abcdef";
-    let mut buf = [0u8; 16];
-    let mut i = 0;
-    
-    if val == 0 {
-        uart_putc(b'0');
-        return;
-    }
-    
-    while val > 0 {
-        buf[i] = hex_chars[val & 0xf];
-        val >>= 4;
-        i += 1;
-    }
-    
-    while i > 0 {
-        i -= 1;
-        uart_putc(buf[i]);
     }
 }

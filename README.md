@@ -1,6 +1,7 @@
-# moss
+# sOS
 
 ![Architecture](https://img.shields.io/badge/arch-aarch64-blue)
+![Architecture](https://img.shields.io/badge/arch-riscv64-blue)
 ![Language](https://img.shields.io/badge/language-Rust-orange)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 

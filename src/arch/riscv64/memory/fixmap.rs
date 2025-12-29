@@ -26,13 +26,46 @@ use libkernel::{
     error::{KernelError, Result},
     memory::{
         PAGE_SIZE,
-        address::{IdentityTranslator, TPA, TVA, VA},
+        address::{IdentityTranslator, PA, TPA, TVA, VA},
         permissions::PtePermissions,
         region::PhysMemoryRegion,
     },
 };
+use super::IMAGE_BASE;
+fn debug_uart_putc(c: u8) {
+    unsafe {
+        let ptr = 0x1000_0000 as *mut u8; 
+        core::ptr::write_volatile(ptr, c);
+    }
+}
 
+fn debug_print(s: &str) {
+    for c in s.bytes() {
+        debug_uart_putc(c);
+    }
+}
 
+fn debug_print_hex(mut val: usize) {
+    let hex_chars = b"0123456789abcdef";
+    let mut buf = [0u8; 16];
+    let mut i = 0;
+    
+    if val == 0 {
+        debug_uart_putc(b'0');
+        return;
+    }
+    
+    while val > 0 {
+        buf[i] = hex_chars[val & 0xf];
+        val >>= 4;
+        i += 1;
+    }
+    
+    while i > 0 {
+        i -= 1;
+        debug_uart_putc(buf[i]);
+    }
+}
 type RvRoot = L0Table;
 type RvRootDesc = L0Descriptor;
 
@@ -44,7 +77,6 @@ type RvL2Desc = L2Descriptor;
 
 type RvLeaf = L3Table;
 type RvLeafDesc = L3Descriptor;
-
 
 pub struct TempFixmapGuard<T> {
     fixmap: *mut Fixmap,
@@ -87,7 +119,6 @@ enum FixmapSlot {
     _DtbEnd = MAX_FDT_SZ / PAGE_SIZE, 
     PgTableTmp,
 }
-
 pub struct Fixmap {
     l1: PgTableArray<RvL1>,
     l2: PgTableArray<RvL2>,
@@ -108,36 +139,88 @@ impl Fixmap {
         }
     }
 
-    pub fn setup_fixmaps(&mut self, root_base: TPA<PgTableArray<RvRoot>>) {
-        let root_table = RvRoot::from_ptr(root_base.to_va::<IdentityTranslator>());
+pub fn setup_fixmaps(&mut self, root_base: TPA<PgTableArray<RvRoot>>) {
+        debug_print("\n[DEBUG] 1. setup_fixmaps entry\n");
+        debug_print("[DEBUG] root_base PA: 0x");
+        debug_print_hex(root_base.value()); 
+        debug_print("\n");
+
+        if root_base.value() == 0 {
+            debug_print("[FATAL] root_base is 0! Caller passed invalid PA.\n");
+            loop {}
+        }
+
+        let root_va = TVA::from_value(root_base.value());
+        let root_table = unsafe { RvRoot::from_ptr(root_va) };
         let invalidator = AllTlbInvalidator {};
 
+        debug_print("[DEBUG] 2. Checking self.l1 alignment...\n");
+        
+        let l1_ptr = &self.l1 as *const _ as usize;
+        debug_print("[DEBUG] self.l1 VA: 0x");
+        debug_print_hex(l1_ptr);
+        debug_print("\n");
+
+        if l1_ptr & 0xFFF != 0 {
+            debug_print("[FATAL] self.l1 is NOT 4KB aligned! Add #[repr(align(4096))] to Fixmap struct.\n");
+            loop {}
+        }
+
+        debug_print("[DEBUG] 3. Calculating PA safely...\n");
+        
+        let l1_pa_val = if l1_ptr < 0xFFFF_0000_0000_0000 {
+            debug_print("[DEBUG] Address is Low (Identity/Phys), using directly.\n");
+            l1_ptr
+        } else {
+            debug_print("[DEBUG] Address is High, using ksym_pa! macro.\n");
+            ksym_pa!(self.l1).value()
+        };
+
+        debug_print("[DEBUG] self.l1 PA: 0x");
+        debug_print_hex(l1_pa_val); 
+        debug_print("\n");
+
+        debug_print("[DEBUG] 4. Creating descriptor...\n");
+        let desc = RvRootDesc::new_next_table(PA::from_value(l1_pa_val));
+
+        debug_print("[DEBUG] 5. Writing to Root Table...\n");
         root_table.set_desc(
             FIXMAP_BASE,
-            RvRootDesc::new_next_table(ksym_pa!(self.l1)),
+            desc,
             &invalidator,
         );
-
+        debug_print("[DEBUG] Root set_desc OK\n");
+        
+        let l2_ptr = &self.l2 as *const _ as usize;
+        let l2_pa_val = if l2_ptr < 0xFFFF_0000_0000_0000 { l2_ptr } else { ksym_pa!(self.l2).value() };
+        
         RvL1::from_ptr(TVA::from_ptr(&mut self.l1 as *mut _)).set_desc(
             FIXMAP_BASE,
-            RvL1Desc::new_next_table(ksym_pa!(self.l2)),
+            RvL1Desc::new_next_table(PA::from_value(l2_pa_val)),
             &invalidator,
         );
+
+        let l3_0_ptr = &self.l3[0] as *const _ as usize;
+        let l3_0_pa_val = if l3_0_ptr < 0xFFFF_0000_0000_0000 { l3_0_ptr } else { ksym_pa!(self.l3[0]).value() };
 
         RvL2::from_ptr(TVA::from_ptr(&mut self.l2 as *mut _)).set_desc(
             FIXMAP_BASE,
-            RvL2Desc::new_next_table(ksym_pa!(self.l3[0])),
+            RvL2Desc::new_next_table(PA::from_value(l3_0_pa_val)),
             &invalidator,
         );
 
-        let l2_entry_coverage = 1 << 21; // 2MB
+        let l3_1_ptr = &self.l3[1] as *const _ as usize;
+        let l3_1_pa_val = if l3_1_ptr < 0xFFFF_0000_0000_0000 { l3_1_ptr } else { ksym_pa!(self.l3[1]).value() };
+        
+        let l2_entry_coverage = 1 << 21; 
         RvL2::from_ptr(TVA::from_ptr(&mut self.l2 as *mut _)).set_desc(
             VA::from_value(FIXMAP_BASE.value() + l2_entry_coverage),
-            RvL2Desc::new_next_table(ksym_pa!(self.l3[1])),
+            RvL2Desc::new_next_table(PA::from_value(l3_1_pa_val)),
             &invalidator,
         );
+        
+        debug_print("[DEBUG] Fixmap setup complete.\n");
     }
-
     pub unsafe fn remap_fdt(&mut self, fdt_ptr: TPA<u8>) -> Result<VA> {
         let fdt = unsafe { Fdt::from_ptr(NonNull::new_unchecked(fdt_ptr.as_ptr_mut())) }
              .map_err(|_| KernelError::InvalidValue)?;
